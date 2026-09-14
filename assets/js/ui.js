@@ -1,3 +1,70 @@
+function isCustomCategoryTab(tab) {
+    if (!tab) return false;
+    if (typeof tab === 'string' && tab.startsWith('custom:')) return true;
+    let customList = [];
+    try {
+        const saved = localStorage.getItem('RESOURCE_CUSTOM_CATEGORIES');
+        if (saved) customList = JSON.parse(saved);
+    } catch(e){}
+    return Array.isArray(customList) && customList.some(c => (typeof c === 'string' && c === tab) || (c && (c.id === tab || c.name === tab)));
+}
+window.isCustomCategoryTab = isCustomCategoryTab;
+
+function categoryStorageKey(tab) {
+    if (!tab) return 'cards';
+    return tab;
+}
+window.categoryStorageKey = categoryStorageKey;
+
+function getCustomCategoryName(tab) {
+    if (!tab) return '';
+    let customList = [];
+    try {
+        const saved = localStorage.getItem('RESOURCE_CUSTOM_CATEGORIES');
+        if (saved) customList = JSON.parse(saved);
+    } catch(e){}
+    if (Array.isArray(customList)) {
+        const found = customList.find(c => (typeof c === 'string' && c === tab) || (c && (c.id === tab || c.name === tab)));
+        if (found) return typeof found === 'string' ? found : found.name;
+    }
+    if (typeof tab === 'string' && tab.startsWith('custom:')) {
+        return decodeURIComponent(tab.replace(/^custom:[0-9]+_?/, ''));
+    }
+    return tab;
+}
+window.getCustomCategoryName = getCustomCategoryName;
+
+function ensureCategoryImportUI() {
+    // 确保各分类导入面板与按钮同步
+}
+window.ensureCategoryImportUI = ensureCategoryImportUI;
+
+function deleteAssetFromDB(id) {
+    return new Promise((resolve, reject) => {
+        try {
+            if (!db) {
+                const req = indexedDB.open('TavernCardHubDB', 1);
+                req.onsuccess = (e) => {
+                    db = e.target.result;
+                    const tx = db.transaction('assets', 'readwrite');
+                    const store = tx.objectStore('assets');
+                    const r = store.delete(id);
+                    r.onsuccess = () => resolve();
+                    r.onerror = () => reject(r.error);
+                };
+                req.onerror = () => reject(req.error);
+                return;
+            }
+            const tx = db.transaction('assets', 'readwrite');
+            const store = tx.objectStore('assets');
+            const req = store.delete(id);
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+        } catch(e) { reject(e); }
+    });
+}
+window.deleteAssetFromDB = deleteAssetFromDB;
+
 async function saveCardCustomUrl() {
     if (!currentItem) return;
     const input = document.getElementById('cardUrlInput');
