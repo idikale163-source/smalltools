@@ -1,70 +1,3 @@
-function isCustomCategoryTab(tab) {
-    if (!tab) return false;
-    if (typeof tab === 'string' && tab.startsWith('custom:')) return true;
-    let customList = [];
-    try {
-        const saved = localStorage.getItem('RESOURCE_CUSTOM_CATEGORIES');
-        if (saved) customList = JSON.parse(saved);
-    } catch(e){}
-    return Array.isArray(customList) && customList.some(c => (typeof c === 'string' && c === tab) || (c && (c.id === tab || c.name === tab)));
-}
-window.isCustomCategoryTab = isCustomCategoryTab;
-
-function categoryStorageKey(tab) {
-    if (!tab) return 'cards';
-    return tab;
-}
-window.categoryStorageKey = categoryStorageKey;
-
-function getCustomCategoryName(tab) {
-    if (!tab) return '';
-    let customList = [];
-    try {
-        const saved = localStorage.getItem('RESOURCE_CUSTOM_CATEGORIES');
-        if (saved) customList = JSON.parse(saved);
-    } catch(e){}
-    if (Array.isArray(customList)) {
-        const found = customList.find(c => (typeof c === 'string' && c === tab) || (c && (c.id === tab || c.name === tab)));
-        if (found) return typeof found === 'string' ? found : found.name;
-    }
-    if (typeof tab === 'string' && tab.startsWith('custom:')) {
-        return decodeURIComponent(tab.replace(/^custom:[0-9]+_?/, ''));
-    }
-    return tab;
-}
-window.getCustomCategoryName = getCustomCategoryName;
-
-function ensureCategoryImportUI() {
-    // 确保各分类导入面板与按钮同步
-}
-window.ensureCategoryImportUI = ensureCategoryImportUI;
-
-function deleteAssetFromDB(id) {
-    return new Promise((resolve, reject) => {
-        try {
-            if (!db) {
-                const req = indexedDB.open('TavernCardHubDB', 1);
-                req.onsuccess = (e) => {
-                    db = e.target.result;
-                    const tx = db.transaction('assets', 'readwrite');
-                    const store = tx.objectStore('assets');
-                    const r = store.delete(id);
-                    r.onsuccess = () => resolve();
-                    r.onerror = () => reject(r.error);
-                };
-                req.onerror = () => reject(req.error);
-                return;
-            }
-            const tx = db.transaction('assets', 'readwrite');
-            const store = tx.objectStore('assets');
-            const req = store.delete(id);
-            req.onsuccess = () => resolve();
-            req.onerror = () => reject(req.error);
-        } catch(e) { reject(e); }
-    });
-}
-window.deleteAssetFromDB = deleteAssetFromDB;
-
 async function saveCardCustomUrl() {
     if (!currentItem) return;
     const input = document.getElementById('cardUrlInput');
@@ -279,390 +212,152 @@ if (fileIn) {
     if (box) { box.innerHTML = ''; box.classList.add('hidden'); }
 }
 
-// === 角色卡/文档多层压缩包解压与版本堆叠去重辅助方法 ===
-async function computeBufferHash(arrayBuffer) {
-    try {
-        if (crypto && crypto.subtle && crypto.subtle.digest) {
-            const hashBuf = await crypto.subtle.digest('SHA-256', arrayBuffer);
-            const hashArr = Array.from(new Uint8Array(hashBuf));
-            return hashArr.map(b => b.toString(16).padStart(2, '0')).join('');
-        }
-    } catch(e){}
-    // Fallback hash
-    const bytes = new Uint8Array(arrayBuffer);
-    let hash = 0;
-    const step = Math.max(1, Math.floor(bytes.length / 5000));
-    for (let i = 0; i < bytes.length; i += step) {
-        hash = ((hash << 5) - hash) + bytes[i];
-        hash |= 0;
-    }
-    return 'h_' + (hash >>> 0).toString(16) + '_' + bytes.length;
-}
-
-function computeTextHash(str) {
-    if (!str) return 'empty';
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        hash = ((hash << 5) - hash) + str.charCodeAt(i);
-        hash |= 0;
-    }
-    return 'th_' + (hash >>> 0).toString(16) + '_' + str.length;
-}
-
-// 递归解压并解析包含多层压缩包内的所有文件
-async function extractArchiveRecursively(fileOrBlob, baseFilename, targetCategory, folder, depth = 0) {
-    if (depth > 6) {
-        console.warn(`[RECURSIVE_ZIP] 超过最大嵌套层级 6: ${baseFilename}`);
-        return { importedCount: 0, duplicateCount: 0, updatedCount: 0 };
-    }
-    if (typeof JSZip === 'undefined') {
-        throw new Error('JSZip 依赖库未就绪');
-    }
-    
-    let zip;
-    try {
-        zip = await JSZip.loadAsync(fileOrBlob);
-    } catch(err) {
-        console.error(`[RECURSIVE_ZIP] 解压失败: ${baseFilename}`, err);
-        return { importedCount: 0, duplicateCount: 0, updatedCount: 0 };
-    }
-
-    let stats = { importedCount: 0, duplicateCount: 0, updatedCount: 0 };
-    const entries = [];
-    zip.forEach((relPath, entry) => {
-        if (!entry.dir && !relPath.startsWith('__MACOSX/') && !relPath.includes('/.DS_Store') && !relPath.endsWith('/Thumbs.db')) {
-            entries.push({ relPath, entry });
-        }
-    });
-
-    for (const item of entries) {
-        const entry = item.entry;
-        const subName = entry.name.split('/').pop() || 'entry';
-        const subExt = subName.split('.').pop().toLowerCase();
-        
-        try {
-            if (subExt === 'zip') {
-                const subBuf = await entry.async('arraybuffer');
-                const subBlob = new Blob([subBuf], { type: 'application/zip' });
-                const subRes = await extractArchiveRecursively(subBlob, subName, targetCategory, folder, depth + 1);
-                stats.importedCount += subRes.importedCount;
-                stats.duplicateCount += subRes.duplicateCount;
-                stats.updatedCount += subRes.updatedCount;
-            } else {
-                const subBuf = await entry.async('arraybuffer');
-                const subFile = new File([subBuf], subName, { type: 'application/octet-stream' });
-                const res = await processFile(subFile, targetCategory, { isFromArchive: true, parentArchive: baseFilename });
-                if (res) {
-                    if (res.status === 'duplicate') stats.duplicateCount++;
-                    else if (res.status === 'stacked') stats.updatedCount++;
-                    else stats.importedCount++;
-                }
+async function processFile(file, targetCategory = currentTab) {
+            const ext=file.name.split('.').pop().toLowerCase();
+            const category=categoryStorageKey(targetCategory);
+            const folder=currentFolderOpened || '';
+            const genId=()=> 'asset_'+Date.now()+'_'+Math.random().toString(36).slice(2,11);
+            async function saveCardFromPng(raw, fallbackName) {
+                let cardData={}; const chunk=extractCharaChunk(raw);
+                if(chunk) { try { cardData=JSON.parse(chunk); } catch(e){} }
+                const d=cardData.data||cardData;
+                await saveAsset({id:genId(),category:'cards',subCategory:folder,name:d.name||fallbackName,fileType:'png',rawBuffer:raw,cardData,tags:extractTagsFromData(d),firstMes:d.first_mes||'',alternateGreetings:d.alternate_greetings||[],personality:extractPersonalityDeep(cardData),worldbook:d.character_book||null,regexScripts:d.extensions?.regex_scripts||null,rawText:JSON.stringify(cardData,null,2),createdAt:Date.now()});
             }
-        } catch(e) {
-            console.warn(`[RECURSIVE_ZIP] 处理子项失败: ${subName}`, e);
-        }
-    }
-    return stats;
-}
-
-// 酒馆卡去重与版本堆叠保存引擎
-async function saveTavernCardWithStacking(cardPayload) {
-    const all = await getAllAssets();
-    const existingCards = all.filter(a => a.category === 'cards');
-    
-    const incomingName = (cardPayload.name || '').trim();
-    const incomingCharaName = (cardPayload.cardData?.data?.name || cardPayload.cardData?.name || incomingName).trim();
-    const incomingDataStr = cardPayload.rawText || (cardPayload.cardData ? JSON.stringify(cardPayload.cardData) : '');
-    const incomingHash = cardPayload.contentHash || computeTextHash(incomingDataStr);
-    
-    // 查找是否存在一模一样的内容 (完全重复: 必须满足内容Hash或底层字节数据完全一致)
-    const exactMatch = existingCards.find(c => {
-        // 1. 如果都有 rawBuffer 且长度与Hash一致
-        if (c.rawBuffer && cardPayload.rawBuffer && c.fileType === cardPayload.fileType) {
-            if (c.contentHash && cardPayload.contentHash && c.contentHash === cardPayload.contentHash) return true;
-        }
-        // 2. 比较内容文本/JSON Hash
-        const cDataStr = c.rawText || (c.cardData ? JSON.stringify(c.cardData) : '');
-        const cHash = c.contentHash || computeTextHash(cDataStr);
-        // 必须Hash相同才算完全重复；并且关联同一个卡片名或同一个实体
-        if (cHash && incomingHash && cHash === incomingHash) {
-            return true;
-        }
-        return false;
-    });
-
-    if (exactMatch) {
-        console.log(`[CARD_IMPORT] 发现内容一模一样的角色卡【${incomingName}】，跳过重复导入。`);
-        return { status: 'duplicate', asset: exactMatch };
-    }
-
-    // 查找同角色/同名但内容有差异的卡片进行版本堆叠 (Stacking)
-    // 只要名字相同 (文件名或角色名一致)，但内容不同，就允许导入并作为新版本堆叠！
-    const targetStackCard = existingCards.find(c => {
-        const cName = (c.name || '').trim();
-        const cCharaName = (c.cardData?.data?.name || c.cardData?.name || cName).trim();
-        if (incomingName && cName && cName === incomingName) return true;
-        if (incomingCharaName && incomingCharaName !== '未命名文件' && incomingCharaName !== 'untitled') {
-            if (cCharaName === incomingCharaName || cName === incomingCharaName) return true;
-        }
-        return false;
-    });
-
-    if (targetStackCard) {
-        console.log(`[CARD_IMPORT] 发现角色卡【${incomingName}】的新版本/变体，正在执行版本堆叠并置顶最新版...`);
-        const versions = targetStackCard.versions || [];
-        
-        // 将旧的当前版本快照压入 versions 堆叠中
-        const oldVersionSnapshot = {
-            versionId: 'ver_' + (targetStackCard.createdAt || Date.now()),
-            versionNum: versions.length + 1,
-            savedAt: targetStackCard.updatedAt || targetStackCard.createdAt || Date.now(),
-            name: targetStackCard.name,
-            fileType: targetStackCard.fileType,
-            rawBuffer: targetStackCard.rawBuffer,
-            cardData: targetStackCard.cardData,
-            rawText: targetStackCard.rawText,
-            tags: targetStackCard.tags,
-            firstMes: targetStackCard.firstMes,
-            alternateGreetings: targetStackCard.alternateGreetings,
-            personality: targetStackCard.personality,
-            worldbook: targetStackCard.worldbook,
-            regexScripts: targetStackCard.regexScripts,
-            contentHash: targetStackCard.contentHash
-        };
-
-        const newVersionsList = [oldVersionSnapshot, ...versions];
-        
-        // 覆盖更新 targetStackCard，将最新版本置顶
-        targetStackCard.name = incomingName || targetStackCard.name;
-        targetStackCard.fileType = cardPayload.fileType;
-        targetStackCard.rawBuffer = cardPayload.rawBuffer;
-        targetStackCard.byteSize = cardPayload.byteSize;
-        targetStackCard.cardData = cardPayload.cardData;
-        targetStackCard.tags = cardPayload.tags || targetStackCard.tags;
-        targetStackCard.firstMes = cardPayload.firstMes || '';
-        targetStackCard.alternateGreetings = cardPayload.alternateGreetings || [];
-        targetStackCard.personality = cardPayload.personality || '';
-        targetStackCard.worldbook = cardPayload.worldbook || null;
-        targetStackCard.regexScripts = cardPayload.regexScripts || null;
-        targetStackCard.rawText = cardPayload.rawText || '';
-        targetStackCard.contentHash = incomingHash;
-        targetStackCard.updatedAt = Date.now();
-        targetStackCard.versions = newVersionsList;
-        targetStackCard.subCategory = cardPayload.subCategory || targetStackCard.subCategory;
-
-        await saveAsset(targetStackCard);
-        allAssetsCache = null;
-        return { status: 'stacked', asset: targetStackCard, versionCount: newVersionsList.length + 1 };
-    }
-
-    // 首次导入全新卡片
-    cardPayload.contentHash = incomingHash;
-    cardPayload.createdAt = Date.now();
-    cardPayload.updatedAt = Date.now();
-    cardPayload.versions = [];
-    await saveAsset(cardPayload);
-    allAssetsCache = null;
-    return { status: 'created', asset: cardPayload };
-}
-
-async function processFile(file, targetCategory = currentTab, options = {}) {
-            const ext = file.name.split('.').pop().toLowerCase();
-            const id = 'asset_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11);
-            const category = categoryStorageKey(targetCategory);
-            const folder = currentFolderOpened || '';
-
-            // 多层/嵌套压缩包解压处理
-            if (ext === 'zip' && category !== 'sandbox') {
-                const stats = await extractArchiveRecursively(file, file.name, targetCategory, folder);
-                const infoMsg = `压缩包解析完成：导入 ${stats.importedCount} 项，堆叠更新 ${stats.updatedCount} 项，跳过完全重复 ${stats.duplicateCount} 项`;
-                console.log(`[ZIP_IMPORT] ${file.name}: ${infoMsg}`);
-                if (!options.isFromArchive) {
-                    showToast('📦', infoMsg);
-                }
-                return { status: 'zip_extracted', stats };
+            async function saveCardFromJson(json, text, fallbackName) {
+                const d=json.data||json; await saveAsset({id:genId(),category:'cards',subCategory:folder,name:d.name||fallbackName,fileType:'json',cardData:json,tags:extractTagsFromData(d),rawText:text,personality:extractPersonalityDeep(json),worldbook:d.character_book||null,createdAt:Date.now()});
             }
-
             if (isCustomCategoryTab(category)) {
-                const raw = await file.arrayBuffer();
-                let preview = '';
-                const textExts = ['txt','css','json','html','htm','js','ts','xml','md','yaml','yml','csv','ini','log'];
-                if (textExts.includes(ext)) { try { preview = await file.text(); } catch(e) { preview = ''; } }
-                const asset = { id, category, subCategory: folder, name: file.name, fileType: ext || 'bin', rawBuffer: raw, byteSize: raw.byteLength, rawText: preview, createdAt: Date.now() };
-                await saveAsset(asset);
-                allAssetsCache = null;
-                return { status: 'created', asset };
+                const raw=await file.arrayBuffer();
+                let preview='';
+                const textExts=['txt','css','json','html','htm','js','ts','xml','md','yaml','yml','csv','ini','log'];
+                if (textExts.includes(ext)) { try { preview=await file.text(); } catch(e) { preview=''; } }
+                await saveAsset({id:genId(), category, subCategory:folder, name:file.name, fileType:ext || 'bin', rawBuffer:raw, byteSize:raw.byteLength, rawText:preview, createdAt:Date.now()});
+                return;
             }
-
-            if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'webp' || ext === 'gif') {
-                const raw = await file.arrayBuffer(); 
-                if (category === 'gallery') {
-                    const hash = await computeBufferHash(raw);
-                    // 图库去重判断
-                    const all = await getAllAssets();
-                    const dup = all.find(a => a.category === 'gallery' && (a.contentHash === hash || (a.name === cleanImportName(file.name) && a.byteSize === raw.byteLength)));
-                    if (dup) {
-                        console.log(`[GALLERY] 发现一模一样的图片【${file.name}】，跳过重复导入。`);
-                        return { status: 'duplicate', asset: dup };
-                    }
-                    const asset = { id, category: 'gallery', subCategory: folder, name: cleanImportName(file.name), fileType: ext, rawBuffer: raw, byteSize: raw.byteLength, contentHash: hash, createdAt: Date.now() };
-                    await saveAsset(asset);
-                    allAssetsCache = null;
-                    return { status: 'created', asset };
+            if (ext==='png' || ext==='jpg' || ext==='jpeg' || ext==='webp' || ext==='gif') {
+                const raw=await file.arrayBuffer();
+                if (category==='gallery') {
+                    await saveAsset({id:genId(), category:'gallery', subCategory:folder, name:cleanImportName(file.name), fileType:ext, rawBuffer:raw, createdAt:Date.now()});
+                    return;
                 }
-
-                // 酒馆角色卡解析与去重堆叠
-                let cardData = {}; 
-                const chunk = extractCharaChunk(raw);
-                if (chunk) { try { cardData = JSON.parse(chunk); } catch(e){} }
-                const d = cardData.data || cardData;
-                const hash = await computeBufferHash(raw);
-                const cardName = d.name || cleanImportName(file.name);
-
-                const cardPayload = {
-                    id,
-                    category: 'cards',
-                    subCategory: folder,
-                    name: cardName,
-                    fileType: ext,
-                    rawBuffer: raw,
-                    byteSize: raw.byteLength,
-                    contentHash: hash,
-                    cardData,
-                    tags: extractTagsFromData(d),
-                    firstMes: d.first_mes || '',
-                    alternateGreetings: d.alternate_greetings || [],
-                    personality: extractPersonalityDeep(cardData),
-                    worldbook: d.character_book || null,
-                    regexScripts: d.extensions?.regex_scripts || null,
-                    rawText: JSON.stringify(cardData, null, 2)
-                };
-
-                return await saveTavernCardWithStacking(cardPayload);
+                try { await saveCardFromPng(raw, cleanImportName(file.name)); }
+                catch(e) { console.error('[CARD] PNG 解析失败:', e); showToast('⚠️', '该 PNG 无法解析出角色卡数据'); }
+                return;
             }
-
-            if (ext === 'json') {
-                const text = await file.text(); 
-                let json = {}; 
-                try { json = JSON.parse(text); } catch(e){}
-                
-                if (category === 'cards') {
-                    const d = json.data || json;
-                    const cardName = d.name || cleanImportName(file.name);
-                    const cardPayload = {
-                        id,
-                        category: 'cards',
-                        subCategory: folder,
-                        name: cardName,
-                        fileType: 'json',
-                        cardData: json,
-                        tags: extractTagsFromData(d),
-                        rawText: text,
-                        personality: extractPersonalityDeep(json),
-                        worldbook: d.character_book || null,
-                        regexScripts: d.extensions?.regex_scripts || null,
-                        firstMes: d.first_mes || '',
-                        alternateGreetings: d.alternate_greetings || []
-                    };
-                    return await saveTavernCardWithStacking(cardPayload);
-                } else if (category === 'worldbooks') {
-                    const all = await getAllAssets();
-                    const textHash = computeTextHash(text);
-                    const wbName = json.name || cleanImportName(file.name);
-                    const dup = all.find(a => a.category === 'worldbooks' && (a.contentHash === textHash || a.name === wbName));
-                    if (dup && dup.contentHash === textHash) {
-                        return { status: 'duplicate', asset: dup };
-                    }
-                    const asset = { id, category: 'worldbooks', subCategory: folder, name: wbName, fileType: 'json', cardData: json, worldbook: json, rawText: text, contentHash: textHash, createdAt: Date.now() };
-                    await saveAsset(asset);
-                    allAssetsCache = null;
-                    return { status: 'created', asset };
+            if (ext==='json') {
+                const text=await file.text(); let json={}; try { json=JSON.parse(text); } catch(e){}
+                if (category==='cards') {
+                    await saveCardFromJson(json, text, cleanImportName(file.name));
+                } else if (category==='worldbooks') {
+                    await saveAsset({id:genId(),category:'worldbooks',subCategory:folder,name:json.name||cleanImportName(file.name),fileType:'json',cardData:json,worldbook:json,rawText:text,createdAt:Date.now()});
                 } else {
-                    const asset = { id, category, subCategory: folder, name: cleanImportName(file.name), fileType: 'json', cardData: json, rawText: text, createdAt: Date.now() };
-                    await saveAsset(asset);
-                    allAssetsCache = null;
-                    return { status: 'created', asset };
+                    await saveAsset({id:genId(),category,subCategory:folder,name:cleanImportName(file.name),fileType:'json',cardData:json,rawText:text,createdAt:Date.now()});
                 }
+                return;
             }
-
-            if (ext === 'txt' || ext === 'css') {
-                const text = await file.text();
-                if (category === 'emojis') {
-                    const parsed = parseEmojiTextLines(text); 
-                    if (!parsed.length) throw new Error('没有识别到表情链接');
-                    const asset = { id, category: 'emojis', subCategory: folder, name: cleanImportName(file.name), fileType: 'json', emojiList: parsed, rawText: text, createdAt: Date.now() };
-                    await saveAsset(asset);
-                    allAssetsCache = null;
-                    return { status: 'created', asset };
+            if (ext==='txt' || ext==='css') {
+                const text=await file.text();
+                if (category==='emojis') {
+                    const parsed=parseEmojiTextLines(text); if(!parsed.length) throw new Error('没有识别到表情链接');
+                    await saveAsset({id:genId(),category:'emojis',subCategory:folder,name:cleanImportName(file.name),fileType:'json',emojiList:parsed,rawText:text,createdAt:Date.now()});
                 } else {
-                    // 文档 / 正则去重与多版本支持
-                    const all = await getAllAssets();
-                    const textHash = computeTextHash(text);
-                    const docName = cleanImportName(file.name);
-                    const existingDoc = all.find(a => a.category === category && a.name === docName);
-                    
-                    if (existingDoc) {
-                        if (existingDoc.rawText === text) {
-                            return { status: 'duplicate', asset: existingDoc };
-                        }
-                        // 文档版本堆叠
-                        existingDoc.historyVersions = existingDoc.historyVersions || [];
-                        const newVerNum = existingDoc.historyVersions.length + 2;
-                        existingDoc.historyVersions.push({ version: newVerNum, content: existingDoc.rawText || '', createdAt: existingDoc.updatedAt || existingDoc.createdAt || Date.now() });
-                        existingDoc.rawText = text;
-                        existingDoc.updatedAt = Date.now();
-                        await saveAsset(existingDoc);
-                        allAssetsCache = null;
-                        return { status: 'stacked', asset: existingDoc };
-                    }
-
-                    const asset = { id, category, subCategory: folder, name: docName, fileType: ext, rawText: text, contentHash: textHash, createdAt: Date.now() };
-                    await saveAsset(asset);
-                    allAssetsCache = null;
-                    return { status: 'created', asset };
+                    await saveAsset({id:genId(),category,subCategory:folder,name:cleanImportName(file.name),fileType:ext,rawText:text,createdAt:Date.now()});
                 }
+                return;
             }
-
-            if (ext === 'docx') {
-                const raw = await file.arrayBuffer(); 
-                const result = await mammoth.extractRawText({ arrayBuffer: raw });
-                const text = result.value || '';
-                const all = await getAllAssets();
-                const docName = cleanImportName(file.name);
-                const existingDoc = all.find(a => a.category === category && a.name === docName);
-                if (existingDoc && existingDoc.rawText === text) {
-                    return { status: 'duplicate', asset: existingDoc };
+            if (ext==='docx') {
+                const raw=await file.arrayBuffer(); const result=await mammoth.extractRawText({arrayBuffer:raw});
+                await saveAsset({id:genId(),category,subCategory:folder,name:cleanImportName(file.name),fileType:'docx',rawText:result.value,rawBuffer:raw,createdAt:Date.now()}); return;
+            }
+            if (ext==='zip') {
+                if (category === 'sandbox') {
+                    const raw=await file.arrayBuffer();
+                    await saveAsset({id:genId(),category:'sandbox',subCategory:folder,name:cleanImportName(file.name),fileType:'zip',rawBuffer:raw,createdAt:Date.now()});
+                    return;
                 }
-                const asset = { id, category, subCategory: folder, name: docName, fileType: 'docx', rawText: text, rawBuffer: raw, byteSize: raw.byteLength, createdAt: Date.now() };
-                await saveAsset(asset);
-                allAssetsCache = null;
-                return { status: 'created', asset };
+                try { await processZipNested(file, category, folder); }
+                catch(e) { console.error('[ZIP-NEST] 解析失败:', e); showToast('⚠️', '压缩包解析失败'); }
+                return;
             }
-
-            if (ext === 'zip') {
-                // 沙盒模式的原生 zip 存储
-                const raw = await file.arrayBuffer(); 
-                const cat = (category === 'sandbox') ? 'sandbox' : category;
-                const asset = { id, category: cat, subCategory: folder, name: cleanImportName(file.name), fileType: 'zip', rawBuffer: raw, byteSize: raw.byteLength, createdAt: Date.now() };
-                await saveAsset(asset); 
-                allAssetsCache = null;
-                return { status: 'created', asset };
-            }
-
-            if (ext === 'html' || ext === 'htm') {
+            if (ext==='html' || ext==='htm') {
                 const rawText = await file.text();
                 const cat = (category === 'sandbox') ? 'sandbox' : category;
-                const asset = { id, category: cat, subCategory: folder, name: cleanImportName(file.name), fileType: 'html', rawText: rawText, createdAt: Date.now() };
-                await saveAsset(asset);
-                allAssetsCache = null;
-                return { status: 'created', asset };
+                await saveAsset({id:genId(),category:cat,subCategory:folder,name:cleanImportName(file.name),fileType:'html',rawText:rawText,createdAt:Date.now()});
+                return;
             }
-
-            const raw = await file.arrayBuffer(); 
-            const asset = { id, category, subCategory: folder, name: cleanImportName(file.name), fileType: ext || 'bin', rawBuffer: raw, byteSize: raw.byteLength, createdAt: Date.now() };
-            await saveAsset(asset); 
-            allAssetsCache = null;
-            return { status: 'created', asset };
+            const raw=await file.arrayBuffer(); await saveAsset({id:genId(),category,subCategory:folder,name:cleanImportName(file.name),fileType:ext||'bin',rawBuffer:raw,createdAt:Date.now()}); return;
+        }
+        async function processZipNested(file, category, folder, depth = 0) {
+            if (typeof JSZip === 'undefined') { showToast('⚠️', 'JSZip 库未加载'); return; }
+            if (depth > 5) return;
+            let zip;
+            try { zip = await JSZip.loadAsync(file); }
+            catch(e) { showToast('⚠️', '压缩包无法解析（可能已损坏或非 zip 格式）'); return; }
+            const isCardMode = (category === 'cards' || category === 'worldbooks');
+            const isDocMode  = (category === 'docs');
+            if (!isCardMode && !isDocMode) {
+                const raw=await file.arrayBuffer();
+                await saveAsset({id:'asset_'+Date.now()+'_'+Math.random().toString(36).slice(2,11),category,subCategory:folder,name:cleanImportName(file.name),fileType:'zip',rawBuffer:raw,createdAt:Date.now()});
+                return;
+            }
+            const entries = Object.values(zip.files).filter(f => !f.dir);
+            const MAX_ENTRIES = 500;
+            if (entries.length > MAX_ENTRIES) showToast('⚠️', `压缩包文件过多(${entries.length})，仅解析前 ${MAX_ENTRIES} 项`);
+            let found = 0;
+            for (const entry of entries.slice(0, MAX_ENTRIES)) {
+                const baseName = entry.name.split('/').pop();
+                if (!baseName || baseName.startsWith('_') || baseName.startsWith('.')) continue;
+                const lower = baseName.toLowerCase();
+                try {
+                    if (isCardMode) {
+                        if (lower.endsWith('.zip')) {
+                            const innerBlob = await entry.async('blob');
+                            await processZipNested(innerBlob, category, folder, depth + 1);
+                            continue;
+                        }
+                        if (lower.endsWith('.png')) {
+                            const raw = await entry.async('arraybuffer');
+                            if (extractCharaChunk(raw)) {
+                                await saveCardFromPng(raw, cleanImportName(baseName));
+                                found++;
+                            }
+                            continue;
+                        }
+                        if (lower.endsWith('.json')) {
+                            const text = await entry.async('string');
+                            let json; try { json = JSON.parse(text); } catch(e) { continue; }
+                            const looksLikeCard = !!(json.spec || json.data?.name || json.name || json.data?.character_book || json.entries);
+                            if (looksLikeCard) {
+                                if (category === 'worldbooks') {
+                                    await saveAsset({id:'asset_'+Date.now()+'_'+Math.random().toString(36).slice(2,11),category:'worldbooks',subCategory:folder,name:json.name||cleanImportName(baseName),fileType:'json',cardData:json,worldbook:json,rawText:text,createdAt:Date.now()});
+                                } else {
+                                    await saveCardFromJson(json, text, cleanImportName(baseName));
+                                }
+                                found++;
+                            }
+                            continue;
+                        }
+                        continue;
+                    }
+                    if (isDocMode) {
+                        if (['txt','md','css','html','htm','log','csv'].some(e2 => lower.endsWith('.' + e2))) {
+                            const text = await entry.async('string');
+                            await saveAsset({id:'asset_'+Date.now()+'_'+Math.random().toString(36).slice(2,11),category:'docs',subCategory:folder,name:cleanImportName(baseName),fileType:lower.split('.').pop(),rawText:text,createdAt:Date.now()});
+                            found++;
+                        } else if (lower.endsWith('.docx')) {
+                            const raw = await entry.async('arraybuffer');
+                            const result = await mammoth.extractRawText({arrayBuffer:raw});
+                            await saveAsset({id:'asset_'+Date.now()+'_'+Math.random().toString(36).slice(2,11),category:'docs',subCategory:folder,name:cleanImportName(baseName),fileType:'docx',rawText:result.value,rawBuffer:raw,createdAt:Date.now()});
+                            found++;
+                        } else if (lower.endsWith('.zip')) {
+                            const innerBlob = await entry.async('blob');
+                            await processZipNested(innerBlob, 'docs', folder, depth + 1);
+                        }
+                        continue;
+                    }
+                } catch(e) { console.warn('[ZIP-NEST] skip:', entry.name, e); }
+            }
+            showToast(found > 0 ? '🎉' : 'ℹ️', `压缩包解析完成：${found} 个${isCardMode ? '角色卡/世界书' : '文档'}已入库，其余文件已忽略`);
         }
         function parseEmojiTextLines(text) {
             const lines = text.split(/\r?\n/);
@@ -761,33 +456,6 @@ async function processFile(file, targetCategory = currentTab, options = {}) {
                 }
             });
         }
-        window.saveAsset = saveAsset;
-
-        function deleteAssetFromDB(id) {
-            return new Promise((resolve, reject) => {
-                try {
-                    const tx = db.transaction('assets', 'readwrite');
-                    const store = tx.objectStore('assets');
-                    const req = store.delete(id);
-                    tx.oncomplete = () => {
-                        allAssetsCache = null;
-                        resolve();
-                    };
-                    req.onerror = (err) => {
-                        console.error('IndexedDB Delete Error:', err);
-                        reject(req.error || new Error('IndexedDB 删除失败'));
-                    };
-                    tx.onerror = () => {
-                        console.error('IndexedDB delete transaction error:', tx.error);
-                        reject(tx.error || new Error('IndexedDB 删除事务失败'));
-                    };
-                } catch(err) {
-                    console.error('deleteAssetFromDB exception:', err);
-                    reject(err);
-                }
-            });
-        }
-        window.deleteAssetFromDB = deleteAssetFromDB;
 
         function getAllAssets() {
             return new Promise((resolve) => {
@@ -2138,13 +1806,11 @@ if (currentTab === 'docs' || currentTab === 'regex') {
                     `;
                 } else {
                     let coverHtml = '';
-                    const verCount = (item.versions && item.versions.length > 0) ? (item.versions.length + 1) : 1;
-                    const verBadgeHtml = verCount > 1 ? `<div class="absolute top-2 right-2 bg-gradient-to-r from-[#d88c9a] to-[#c97b8b] text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-full shadow-sm z-10 flex items-center gap-0.5"><i data-lucide="layers" class="w-2.5 h-2.5"></i> V${verCount}</div>` : '';
                     if (item.rawBuffer && item.fileType === 'png') {
                         const blob = new Blob([item.rawBuffer], { type: 'image/png' }), url = URL.createObjectURL(blob);
-                        coverHtml = `<div class="aspect-square rounded-lg overflow-hidden bg-slate-100 mb-1 border border-slate-100 relative">${verBadgeHtml}<img src="${url}" class="w-full h-full object-cover"></div>`;
+                        coverHtml = `<div class="aspect-square rounded-lg overflow-hidden bg-slate-100 mb-1 border border-slate-100"><img src="${url}" class="w-full h-full object-cover"></div>`;
                     } else {
-                        coverHtml = `<div class="h-20 rounded-lg bg-[#fdf4f5] mb-1 flex items-center justify-center text-[#d88c9a] relative">${verBadgeHtml}<i data-lucide="${item.fileType === 'docx' || item.fileType === 'txt' ? 'file-text' : 'user'}" class="w-6 h-6"></i></div>`;
+                        coverHtml = `<div class="h-20 rounded-lg bg-[#fdf4f5] mb-1 flex items-center justify-center text-[#d88c9a]"><i data-lucide="${item.fileType === 'docx' || item.fileType === 'txt' ? 'file-text' : 'user'}" class="w-6 h-6"></i></div>`;
                     }
                     card.innerHTML = `<div>${coverHtml}<h3 class="font-bold text-sm text-[#4a3e3d] text-center truncate py-1">${item.name}</h3>${item.tags && item.tags.length > 0 ? `<div class="flex items-center justify-center gap-1 flex-wrap pt-0.5">${item.tags.slice(0, 3).map(t => `<span class="text-[9px] px-1.5 py-0.2 rounded bg-[#f8eeee] text-[#b86b7a] font-medium">🏷️ ${t}</span>`).join('')}${item.tags.length > 3 ? `<span class="text-[9px] text-[#a38b8d]">+${item.tags.length - 3}</span>` : ''}</div>` : ''}</div>`;
                 }
@@ -2342,7 +2008,7 @@ if (currentTab === 'docs' || currentTab === 'regex') {
 
             // 如果卡片格式是 docx 或 txt 文本类型（或者非 JSON/PNG 深度解析的角色卡/世界书/番外），直接切换到文档全文模式，不显示人设世界书等 Tab
             const ext = (item.fileType || '').toLowerCase();
-            const isDeepCard = (item.category === 'cards') && ((item.cardData && (item.cardData.data || item.cardData.name || item.cardData.spec)) || item.firstMes || item.personality || (item.versions && item.versions.length > 0) || item.fileType === 'png' || item.fileType === 'json');
+            const isDeepCard = (item.category === 'cards') && item.cardData && (item.cardData.data || item.cardData.name || item.cardData.spec);
             if (ext === 'docx' || ext === 'doc' || ext === 'txt' || item.category === 'docs' || item.category === 'regex' || !isDeepCard) {
                 document.getElementById('secondaryPillsBar').classList.add('hidden');
                 switchDetailTab('doc-full');
@@ -2357,11 +2023,7 @@ if (currentTab === 'docs' || currentTab === 'regex') {
             let pText = item.personality || extractPersonalityDeep(item.cardData || {});
             document.getElementById('overviewPersonalityText').innerText = pText;
             personalityCollapsed = true; document.getElementById('overviewPersonalityBody').classList.add('hidden'); document.getElementById('personalityChevron').classList.remove('rotate-180');
-            renderGreetingsList(item); 
-            renderWorldbookEntries(); 
-            renderRegexEntries(); 
-            renderCardVersions();
-            switchDetailTab('overview');
+            renderGreetingsList(item); renderWorldbookEntries(); renderRegexEntries(); switchDetailTab('overview');
         }
 
         function renderEmojiPackGrid() {
@@ -2594,11 +2256,9 @@ if (currentTab === 'docs' || currentTab === 'regex') {
         function switchDetailTab(subtab) {
             document.querySelectorAll('.pill-tab').forEach(b => b.classList.remove('active'));
             const activePill = document.getElementById(`detail-tab-${subtab}`); if (activePill) activePill.classList.add('active');
-            ['overview', 'greetings', 'worldbook', 'regex', 'card-versions', 'doc-full', 'emoji-grid', 'theme-standalone'].forEach(st => {
+            ['overview', 'greetings', 'worldbook', 'regex', 'doc-full', 'emoji-grid', 'theme-standalone'].forEach(st => {
                 const el = document.getElementById(`subview-${st}`);
-                if (el) {
-                    if (st === subtab) el.classList.remove('hidden'); else el.classList.add('hidden');
-                }
+                if (st === subtab) el.classList.remove('hidden'); else el.classList.add('hidden');
             });
         }
 
@@ -2734,225 +2394,24 @@ if (currentTab === 'docs' || currentTab === 'regex') {
             if (entries[index]) { navigator.clipboard.writeText(entries[index].content || ''); showToast('📋', '词条内容已复制！'); }
         }
 
-        // ================= 角色卡版本堆叠管理视图与操作 =================
-        function renderCardVersions() {
-            const container = document.getElementById('cardVersionsContainer');
-            const tabText = document.getElementById('detail-tab-card-versions-text');
-            const bannerBadge = document.getElementById('overviewVersionCountBadge');
-            const bannerTip = document.getElementById('overviewVersionStackTip');
-            if (!container || !currentItem) return;
-
-            const versions = currentItem.versions || [];
-            const totalCount = versions.length + 1;
-            if (tabText) {
-                tabText.innerText = `版本堆叠 (${totalCount})`;
-            }
-
-            if (bannerBadge) {
-                bannerBadge.innerText = `当前使用 V${totalCount} 版 (置顶生效)`;
-            }
-            if (bannerTip) {
-                bannerTip.innerText = versions.length > 0 ? `已堆叠 ${versions.length} 个历史版本` : '暂无其他历史堆叠版本';
-            }
-
-            container.innerHTML = '';
-
-            // 1. 当前版本 (最新置顶生效版)
-            const currentVerCard = document.createElement('div');
-            currentVerCard.className = "bg-[#fdf4f5] border-2 border-[#d88c9a] rounded-2xl p-4 shadow-sm space-y-2 relative overflow-hidden";
-            const curDate = new Date(currentItem.updatedAt || currentItem.createdAt || Date.now()).toLocaleString();
-            
-            currentVerCard.innerHTML = `
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-2">
-                        <span class="px-2.5 py-0.5 rounded-full bg-[#d88c9a] text-white text-[11px] font-extrabold flex items-center gap-1 shadow-sm">
-                            <i data-lucide="check-circle" class="w-3 h-3"></i> 当前使用 (最新版 V${totalCount})
-                        </span>
-                        <span class="text-[10px] text-[#8c7173] font-mono">${curDate}</span>
-                    </div>
-                    <span class="text-[10px] text-[#b86b7a] font-bold bg-white/80 px-2 py-0.5 rounded-md border border-[#f5e1e3]">
-                        ${(currentItem.fileType || 'PNG').toUpperCase()}
-                    </span>
-                </div>
-                <div class="text-xs font-bold text-[#4a3e3d] pt-1">${currentItem.name}</div>
-                <div class="text-[11px] text-[#8c7173] line-clamp-2 bg-white/70 p-2 rounded-xl border border-[#f7ecee]">
-                    ${currentItem.personality || extractPersonalityDeep(currentItem.cardData || {}) || '无性格描述'}
-                </div>
-            `;
-            container.appendChild(currentVerCard);
-
-            // 2. 历史版本列表 (按时间降序堆叠)
-            if (versions.length === 0) {
-                const emptyTip = document.createElement('div');
-                emptyTip.className = "py-6 text-center text-[#a38b8d] text-xs bg-white/50 rounded-2xl border border-dashed border-[#f2e3e3]";
-                emptyTip.innerHTML = `<i data-lucide="layers" class="w-5 h-5 mx-auto mb-1.5 opacity-40"></i>暂无其他历史变体版本。后续导入该角色的异动版本时将自动堆叠于此。`;
-                container.appendChild(emptyTip);
-            } else {
-                versions.forEach((ver, idx) => {
-                    const verNum = totalCount - 1 - idx;
-                    const verDate = new Date(ver.savedAt || Date.now()).toLocaleString();
-                    const verCard = document.createElement('div');
-                    verCard.className = "ui-card p-3.5 space-y-2.5 hover:border-[#d88c9a] transition bg-white/90";
-                    
-                    verCard.innerHTML = `
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
-                                <span class="px-2 py-0.5 rounded-full bg-[#f0e4e6] text-[#8c7173] text-[10px] font-bold">
-                                    历史版本 V${verNum}
-                                </span>
-                                <span class="text-[10px] text-[#a38b8d] font-mono">${verDate}</span>
-                            </div>
-                            <div class="flex items-center gap-1.5">
-                                <button onclick="exportSingleCardVersion(${idx})" class="px-2 py-1 rounded-lg bg-[#faf0f2] hover:bg-[#f5e1e3] text-[#b86b7a] text-[10px] font-bold transition flex items-center gap-1">
-                                    <i data-lucide="download" class="w-3 h-3"></i> 导出此版
-                                </button>
-                                <button onclick="rollbackToCardVersion(${idx})" class="px-2 py-1 rounded-lg bg-[#d88c9a] hover:bg-[#c97b8b] text-white text-[10px] font-bold transition flex items-center gap-1 shadow-sm">
-                                    <i data-lucide="rotate-ccw" class="w-3 h-3"></i> 恢复为当前版
-                                </button>
-                                <button onclick="deleteSingleCardVersion(${idx})" class="p-1 rounded-lg text-rose-400 hover:text-rose-600 hover:bg-rose-50 transition" title="删除该历史版本">
-                                    <i data-lucide="trash-2" class="w-3 h-3"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="text-xs font-bold text-[#4a3e3d]">${ver.name || currentItem.name}</div>
-                        <div class="text-[11px] text-[#8c7173] line-clamp-2 bg-[#faf6f0] p-2 rounded-xl border border-[#f2e3e3]">
-                            ${ver.personality || (ver.cardData ? extractPersonalityDeep(ver.cardData) : '') || '无性格描述'}
-                        </div>
-                    `;
-                    container.appendChild(verCard);
-                });
-            }
-
-            lucide.createIcons();
-        }
-
-        // 切换回指定历史版本并将其置顶为当前版本
-        async function rollbackToCardVersion(versionIndex) {
-            if (!currentItem || !currentItem.versions || !currentItem.versions[versionIndex]) return;
-            const targetVer = currentItem.versions[versionIndex];
-            
-            if (!confirm(`确定要将卡片恢复为【历史版本 V${currentItem.versions.length + 1 - 1 - versionIndex}】吗？当前版本将自动保存进历史堆叠中。`)) {
-                return;
-            }
-
-            showToast('⌛', '正在切换并置顶历史版本...');
-
-            // 1. 将现有的当前版打包存入 versions 堆叠
-            const curSnapshot = {
-                versionId: 'ver_' + (currentItem.updatedAt || currentItem.createdAt || Date.now()),
-                versionNum: currentItem.versions.length + 1,
-                savedAt: currentItem.updatedAt || currentItem.createdAt || Date.now(),
-                name: currentItem.name,
-                fileType: currentItem.fileType,
-                rawBuffer: currentItem.rawBuffer,
-                byteSize: currentItem.byteSize,
-                cardData: currentItem.cardData,
-                rawText: currentItem.rawText,
-                tags: currentItem.tags,
-                firstMes: currentItem.firstMes,
-                alternateGreetings: currentItem.alternateGreetings,
-                personality: currentItem.personality,
-                worldbook: currentItem.worldbook,
-                regexScripts: currentItem.regexScripts,
-                contentHash: currentItem.contentHash
-            };
-
-            // 2. 从 versions 中移除目标版本，并将 curSnapshot 压入
-            const newVersions = currentItem.versions.filter((_, idx) => idx !== versionIndex);
-            newVersions.unshift(curSnapshot);
-
-            // 3. 将 targetVer 的数据写回 currentItem
-            currentItem.name = targetVer.name || currentItem.name;
-            currentItem.fileType = targetVer.fileType || currentItem.fileType;
-            currentItem.rawBuffer = targetVer.rawBuffer;
-            currentItem.byteSize = targetVer.byteSize || (targetVer.rawBuffer ? targetVer.rawBuffer.byteLength : 0);
-            currentItem.cardData = targetVer.cardData;
-            currentItem.rawText = targetVer.rawText;
-            currentItem.tags = targetVer.tags || currentItem.tags;
-            currentItem.firstMes = targetVer.firstMes || '';
-            currentItem.alternateGreetings = targetVer.alternateGreetings || [];
-            currentItem.personality = targetVer.personality || '';
-            currentItem.worldbook = targetVer.worldbook || null;
-            currentItem.regexScripts = targetVer.regexScripts || null;
-            currentItem.contentHash = targetVer.contentHash;
-            currentItem.updatedAt = Date.now();
-            currentItem.versions = newVersions;
-
-            await saveAsset(currentItem);
-            allAssetsCache = null;
-
-            // 刷新详情页各 Tab 内容
-            let pText = currentItem.personality || extractPersonalityDeep(currentItem.cardData || {});
-            document.getElementById('overviewPersonalityText').innerText = pText;
-            renderGreetingsList(currentItem);
-            renderWorldbookEntries();
-            renderRegexEntries();
-            renderCardVersions();
-            renderItems();
-
-            showToast('🎉', '已成功恢复至该版本并置顶！');
-        }
-
-        // 单独导出指定历史版本
-        function exportSingleCardVersion(versionIndex) {
-            if (!currentItem || !currentItem.versions || !currentItem.versions[versionIndex]) return;
-            const targetVer = currentItem.versions[versionIndex];
-            const name = targetVer.name || currentItem.name || 'card_ver';
-            const verNum = currentItem.versions.length + 1 - 1 - versionIndex;
-            const filename = `${name}_V${verNum}`;
-
-            if (targetVer.rawBuffer && targetVer.fileType === 'png') {
-                downloadBuffer(targetVer.rawBuffer, `${filename}.png`, 'image/png');
-            } else if (targetVer.cardData || targetVer.rawText) {
-                const jsonStr = targetVer.rawText || JSON.stringify(targetVer.cardData, null, 2);
-                downloadText(jsonStr, `${filename}.json`, 'application/json');
-            } else if (targetVer.rawBuffer) {
-                downloadBuffer(targetVer.rawBuffer, `${filename}.${targetVer.fileType || 'bin'}`, 'application/octet-stream');
-            } else {
-                showToast('⚠️', '该历史版本无可用原始数据');
-            }
-        }
-
-        // 删除指定历史版本
-        async function deleteSingleCardVersion(versionIndex) {
-            if (!currentItem || !currentItem.versions || !currentItem.versions[versionIndex]) return;
-            if (!confirm(`确定要删除该历史版本吗？`)) return;
-
-            currentItem.versions.splice(versionIndex, 1);
-            await saveAsset(currentItem);
-            allAssetsCache = null;
-            renderCardVersions();
-            renderItems();
-            showToast('🗑️', '已删除该历史版本');
-        }
-
-        window.renderCardVersions = renderCardVersions;
-        window.rollbackToCardVersion = rollbackToCardVersion;
-        window.exportSingleCardVersion = exportSingleCardVersion;
-        window.deleteSingleCardVersion = deleteSingleCardVersion;
-
         async function deleteCurrentItem() {
             if (!currentItem) return;
-            const targetName = currentItem.name || '该资产';
-            const idToDelete = currentItem.id;
-            if (confirm(`确定要删除“${targetName}”吗？此操作不可撤销。`)) {
-                try {
-                    await deleteAssetFromDB(idToDelete);
+            if (confirm(`确定要删除“${currentItem.name}”吗？`)) {
+                const idToDelete = currentItem.id;
+                const tx = db.transaction('assets', 'readwrite'); 
+                tx.objectStore('assets').delete(idToDelete);
+                tx.oncomplete = async () => { 
+                    allAssetsCache = null; // Clear memory cache immediately!
                     if (supabaseClient) { 
                         try { await supabaseClient.from('tavern_assets').delete().eq('id', idToDelete); } catch(e){} 
-                    }
-                    currentItem = null;
+                    } 
                     closeDetailView(); 
-                    if (typeof updateBadges === 'function') updateBadges(); 
-                    await renderItems(); 
-                    showToast('🗑️', `已成功删除“${targetName}”！`); 
-                } catch(err) {
-                    console.error('Delete item failed:', err);
-                    showToast('❌', '删除失败: ' + (err.message || err));
-                }
+                    updateBadges(); 
+                    renderItems(); 
+                    showToast('🗑️', '已成功删除资产！'); 
+                };
             }
         }
-        window.deleteCurrentItem = deleteCurrentItem;
 
         function copyText(id) {
             const el = document.getElementById(id) || document.getElementById('docFullContentTextarea');
@@ -3290,7 +2749,8 @@ async function deleteEntireFolder(folderName, itemCount) {
         const all = await getAllAssets();
         const toDelete = all.filter(a => a.category === currentTab && a.subCategory === folderName);
         for (let item of toDelete) {
-            await deleteAssetFromDB(item.id);
+            const tx = db.transaction('assets', 'readwrite');
+            tx.objectStore('assets').delete(item.id);
             // 如果开启了 Supabase 云端，静默清理云端对应行
             if (supabaseClient) {
                 try { await supabaseClient.from('tavern_assets').delete().eq('id', item.id); } catch(e){}
@@ -3307,14 +2767,7 @@ async function deleteEntireFolder(folderName, itemCount) {
         customFolders = customFolders.filter(f => f !== folderName);
         localStorage.setItem(key, JSON.stringify(customFolders));
 
-        if (currentFolderOpened === folderName) {
-            currentFolderOpened = null;
-        }
-
         allAssetsCache = null;
-        if (typeof syncCustomFoldersToCloudSilent === 'function') {
-            syncCustomFoldersToCloudSilent();
-        }
         if (typeof updateBadges === 'function') updateBadges();
         await renderItems();
         showToast('🎉', `分类文件夹“${folderName}”已成功彻底删除！`);
@@ -3619,27 +3072,18 @@ function openLinkInDefaultBrowser(url, e) {
 
 async function deleteSingleAsset(id, e) {
     if (e && e.stopPropagation) e.stopPropagation();
-    if (e && e.preventDefault) e.preventDefault();
-    const assets = await getAllAssets();
-    const target = assets.find(a => a.id === id);
-    const targetName = target ? target.name : '该项资产';
-    if (confirm(`确定要删除“${targetName}”吗？此操作不可撤销。`)) {
-        try {
-            await deleteAssetFromDB(id);
+    if (confirm('确定要删除这项资产吗？')) {
+        const tx = db.transaction('assets', 'readwrite');
+        tx.objectStore('assets').delete(id);
+        tx.oncomplete = async () => {
+            allAssetsCache = null;
             if (supabaseClient) {
                 try { await supabaseClient.from('tavern_assets').delete().eq('id', id); } catch(err){}
             }
-            if (currentItem && currentItem.id === id) {
-                currentItem = null;
-                closeDetailView();
-            }
-            if (typeof updateBadges === 'function') updateBadges();
-            await renderItems();
-            showToast('🗑️', `已成功删除“${targetName}”！`);
-        } catch(err) {
-            console.error('Delete single asset failed:', err);
-            showToast('❌', '删除失败: ' + (err.message || err));
-        }
+            updateBadges();
+            renderItems();
+            showToast('🗑️', '已删除');
+        };
     }
 }
 
@@ -3874,34 +3318,13 @@ function triggerGlobalDirectImport() {
             if (!files.length) return;
             try {
                 showToast('⌛', `正在导入 ${files.length} 个文件...`);
-                let createdCount = 0;
-                let stackedCount = 0;
-                let duplicateCount = 0;
-
-                for (const file of files) {
-                    const res = await processFile(file, currentTab);
-                    if (res) {
-                        if (res.status === 'stacked') stackedCount++;
-                        else if (res.status === 'duplicate') duplicateCount++;
-                        else if (res.status === 'created') createdCount++;
-                    }
-                }
+                for (const file of files) await processFile(file, currentTab);
                 allAssetsCache = null;
                 updateBadges();
                 await renderItems();
-
-                if (stackedCount > 0 && createdCount === 0) {
-                    showToast('🥞', `已成功将 ${stackedCount} 张同名/同角色卡片作为新版本堆叠并置顶！`);
-                } else if (stackedCount > 0 && createdCount > 0) {
-                    showToast('🎉', `导入完成：新建 ${createdCount} 个，版本堆叠 ${stackedCount} 个`);
-                } else if (duplicateCount > 0 && createdCount === 0) {
-                    showToast('ℹ️', `所选 ${duplicateCount} 个文件与库中内容完全一致，已跳过`);
-                } else {
-                    showToast('🎉', `成功存入当前分类！`);
-                }
+                showToast('🎉', `成功存入当前分类！`);
             } catch(err) {
-                console.error(err);
-                showToast('❌', '文件导入失败: ' + (err.message || err));
+                showToast('❌', '文件导入失败');
             } finally {
                 e.target.value = '';
             }
