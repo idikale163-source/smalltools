@@ -28,19 +28,22 @@ function toggleCloudConfigCollapse() {
         };
         request.onsuccess = (e) => {
             db = e.target.result;
-            // ui.js 在本文件之后加载，等待所有模块完成定义后再启动界面。
+            // 等待 ui.js 等各模块完成定义后再平滑启动界面，增加 50ms 节流与最大重试保护
+            let retryCount = 0;
             const boot = () => {
                 if (typeof updateBadges !== 'function' || typeof renderItems !== 'function') {
-                    setTimeout(boot, 0);
+                    if (retryCount++ < 60) {
+                        setTimeout(boot, 50);
+                    }
                     return;
                 }
-                initSupabaseClient();
-                initGithubClient();
-                updateBadges();
-                renderItems();
-                autoSyncFromCloudSilent();
-                renderEmojiFormatBuilder();
-                setupGlobalPasteListener();
+                if (typeof initSupabaseClient === 'function') initSupabaseClient();
+                if (typeof initGithubClient === 'function') initGithubClient();
+                if (typeof updateBadges === 'function') updateBadges();
+                if (typeof renderItems === 'function') renderItems();
+                if (typeof autoSyncFromCloudSilent === 'function') autoSyncFromCloudSilent();
+                if (typeof renderEmojiFormatBuilder === 'function') renderEmojiFormatBuilder();
+                if (typeof setupGlobalPasteListener === 'function') setupGlobalPasteListener();
             };
             boot();
         };
