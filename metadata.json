@@ -1,0 +1,6 @@
+{
+  "name": "TavernCardHub - 酒馆卡与万能解压管理中心",
+  "description": "酒馆角色卡自动智能去重与多版本堆叠置顶管理系统，支持多层嵌套压缩包深度递归解析与解压、文档/世界书/正则多版本管理、本地持久化与批量导出。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
