@@ -10,7 +10,14 @@ function toggleSidebar() {
     }
 }
 
-lucide.createIcons();
+if (typeof window !== 'undefined') {
+    window.safeCreateIcons = function() {
+        if (typeof window.lucide !== 'undefined' && typeof window.lucide.createIcons === 'function') {
+            try { window.lucide.createIcons(); } catch(e) {}
+        }
+    };
+    window.safeCreateIcons();
+}
 
         let supabaseClient = null;
         let cloudConfigCollapsed = true;

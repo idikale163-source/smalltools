@@ -1,3 +1,10 @@
+function safeCreateLucideIcons() {
+    if (typeof window !== 'undefined' && typeof window.lucide !== 'undefined' && typeof window.lucide.createIcons === 'function') {
+        try { window.lucide.createIcons(); } catch(e) {}
+    }
+}
+window.safeCreateLucideIcons = safeCreateLucideIcons;
+
 async function saveCardCustomUrl() {
     if (!currentItem) return;
     const input = document.getElementById('cardUrlInput');
@@ -1303,8 +1310,8 @@ async function processFile(file, targetCategory = currentTab) {
             const localSaveBtn = document.getElementById('galleryLocalSaveBtn');
             const urlSaveBtn = document.getElementById('galleryUrlSaveBtn');
 
-            if (input && input.dataset.bound !== '1') {
-                input.dataset.bound = '1';
+            if (input && input.getAttribute && input.getAttribute('data-bound') !== '1') {
+                input.setAttribute('data-bound', '1');
                 chooseBtn?.addEventListener('click', ev => { ev.preventDefault(); input.click(); });
                 input.addEventListener('change', ev => {
                     pendingGalleryFiles = Array.from(ev.target.files || []);
@@ -1313,13 +1320,13 @@ async function processFile(file, targetCategory = currentTab) {
                 });
             }
 
-            if (localSaveBtn && localSaveBtn.dataset.bound !== '1') {
-                localSaveBtn.dataset.bound = '1';
+            if (localSaveBtn && localSaveBtn.getAttribute && localSaveBtn.getAttribute('data-bound') !== '1') {
+                localSaveBtn.setAttribute('data-bound', '1');
                 localSaveBtn.addEventListener('click', saveLocalGalleryPictures);
             }
 
-            if (urlSaveBtn && urlSaveBtn.dataset.bound !== '1') {
-                urlSaveBtn.dataset.bound = '1';
+            if (urlSaveBtn && urlSaveBtn.getAttribute && urlSaveBtn.getAttribute('data-bound') !== '1') {
+                urlSaveBtn.setAttribute('data-bound', '1');
                 urlSaveBtn.addEventListener('click', saveGalleryUrl);
             }
         }
@@ -3785,8 +3792,8 @@ window.closeTuchuangModal = function() {
 
 function initTuchuangFloatingBtnDrag() {
     const btn = document.getElementById('tuchuangFloatingBackBtn');
-    if (!btn || btn.dataset.dragInited) return;
-    btn.dataset.dragInited = 'true';
+    if (!btn || (btn.getAttribute && btn.getAttribute('data-drag-inited') === 'true')) return;
+    if (btn.setAttribute) btn.setAttribute('data-drag-inited', 'true');
 
     let isDragging = false;
     let startX, startY, initialLeft, initialTop;
@@ -3822,8 +3829,8 @@ function initTuchuangFloatingBtnDrag() {
 
 function initBubbleGenFloatingBtnDrag() {
     const btn = document.getElementById('bubbleGenFloatingBackBtn');
-    if (!btn || btn.dataset.dragInited) return;
-    btn.dataset.dragInited = 'true';
+    if (!btn || (btn.getAttribute && btn.getAttribute('data-drag-inited') === 'true')) return;
+    if (btn.setAttribute) btn.setAttribute('data-drag-inited', 'true');
 
     let isDragging = false;
     let startX, startY, initialLeft, initialTop;
