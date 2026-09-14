@@ -145,8 +145,8 @@ function switchTab(tab, e) {
     } else {
         renderItems();
     }
-    // 最后关闭 sidebar,确保点击事件不再冒泡到 overlay
-    if (typeof toggleSidebar === 'function') toggleSidebar();
+    // 明确仅关闭 sidebar (传入 false), 确保不意外二次翻转展开
+    if (typeof toggleSidebar === 'function') toggleSidebar(false);
     setTimeout(ensureCategoryImportUI, 0);
 }
 
@@ -4192,3 +4192,23 @@ async function importAssetsFromZip() {
     };
     input.click();
 }
+
+// 保证无论何时脚本加载完成，都能即时触发首屏渲染与各模块注册
+function ensureAppBoot() {
+    if (window._appBooted) return;
+    window._appBooted = true;
+    if (typeof initSupabaseClient === 'function') initSupabaseClient();
+    if (typeof initGithubClient === 'function') initGithubClient();
+    if (typeof updateBadges === 'function') updateBadges();
+    if (typeof renderItems === 'function') renderItems();
+    if (typeof autoSyncFromCloudSilent === 'function') autoSyncFromCloudSilent();
+    if (typeof renderEmojiFormatBuilder === 'function') renderEmojiFormatBuilder();
+    if (typeof setupGlobalPasteListener === 'function') setupGlobalPasteListener();
+    if (typeof safeCreateLucideIcons === 'function') safeCreateLucideIcons();
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', ensureAppBoot);
+} else {
+    ensureAppBoot();
+}
+window.addEventListener('load', ensureAppBoot);

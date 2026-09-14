@@ -10,19 +10,52 @@ function toggleCloudConfigCollapse() {
 
         function copySqlCode() { navigator.clipboard.writeText(SQL_CODE); showToast('📋', '建表 SQL 已复制到剪贴板！'); }
 
-        let db, currentTab = 'cards', currentItem = null, personalityCollapsed = true;
+        var db = null;
+        window.db = db;
+        var currentTab = 'cards';
+        window.currentTab = currentTab;
+        var currentItem = null;
+        window.currentItem = currentItem;
+        var personalityCollapsed = true;
+        window.personalityCollapsed = personalityCollapsed;
 
-        function toggleSidebar() {
+        function toggleSidebar(forceOpen) {
             const drawer = document.getElementById('sidebarDrawer') || document.getElementById('sidebar');
             const overlay = document.getElementById('drawerOverlay');
             if (!drawer) return;
-            const isClosed = drawer.classList.contains('-translate-x-full');
-            if (isClosed) {
-                drawer.classList.remove('-translate-x-full');
-                if (overlay) overlay.classList.remove('opacity-0', 'pointer-events-none', 'hidden');
+
+            let shouldOpen;
+            if (typeof forceOpen === 'boolean') {
+                shouldOpen = forceOpen;
             } else {
+                const isOpen = drawer.getAttribute('data-open') === '1' || drawer.classList.contains('active') || (!drawer.classList.contains('-translate-x-full') && drawer.style.transform === 'translateX(0%)');
+                shouldOpen = !isOpen;
+            }
+
+            if (shouldOpen) {
+                drawer.setAttribute('data-open', '1');
+                drawer.classList.remove('-translate-x-full');
+                drawer.classList.add('active', 'translate-x-0');
+                drawer.style.transform = 'translateX(0%)';
+                if (overlay) {
+                    overlay.classList.remove('opacity-0', 'pointer-events-none', 'hidden');
+                    overlay.classList.add('active', 'opacity-100', 'pointer-events-auto');
+                    overlay.style.display = 'block';
+                    overlay.style.pointerEvents = 'auto';
+                    overlay.style.opacity = '1';
+                }
+            } else {
+                drawer.setAttribute('data-open', '0');
                 drawer.classList.add('-translate-x-full');
-                if (overlay) overlay.classList.add('opacity-0', 'pointer-events-none');
+                drawer.classList.remove('active', 'translate-x-0');
+                drawer.style.transform = 'translateX(-100%)';
+                if (overlay) {
+                    overlay.classList.add('opacity-0', 'pointer-events-none');
+                    overlay.classList.remove('active', 'opacity-100', 'pointer-events-auto');
+                    overlay.style.display = 'none';
+                    overlay.style.pointerEvents = 'none';
+                    overlay.style.opacity = '0';
+                }
             }
         }
         window.toggleSidebar = toggleSidebar;
@@ -37,15 +70,15 @@ function toggleCloudConfigCollapse() {
         };
         request.onsuccess = (e) => {
             db = e.target.result;
-            // 等待 ui.js 等各模块完成定义后再平滑启动界面，增加 50ms 节流与最大重试保护
             let retryCount = 0;
             const boot = () => {
                 if (typeof updateBadges !== 'function' || typeof renderItems !== 'function') {
-                    if (retryCount++ < 60) {
-                        setTimeout(boot, 50);
+                    if (retryCount++ < 120) {
+                        setTimeout(boot, 30);
                     }
                     return;
                 }
+                window._appBooted = true;
                 if (typeof initSupabaseClient === 'function') initSupabaseClient();
                 if (typeof initGithubClient === 'function') initGithubClient();
                 if (typeof updateBadges === 'function') updateBadges();

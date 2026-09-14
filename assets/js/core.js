@@ -1,18 +1,40 @@
 
-function toggleSidebar() {
+function toggleSidebar(forceOpen) {
     const drawer = document.getElementById("sidebarDrawer") || document.getElementById("sidebar");
     const overlay = document.getElementById("drawerOverlay");
     if (!drawer) return;
-    const isClosed = drawer.classList.contains("-translate-x-full");
-    if (isClosed) {
-        drawer.classList.remove("-translate-x-full");
+
+    let shouldOpen;
+    if (typeof forceOpen === 'boolean') {
+        shouldOpen = forceOpen;
+    } else {
+        const isOpen = drawer.getAttribute('data-open') === '1' || drawer.classList.contains('active') || (!drawer.classList.contains('-translate-x-full') && drawer.style.transform === 'translateX(0%)');
+        shouldOpen = !isOpen;
+    }
+
+    if (shouldOpen) {
+        drawer.setAttribute('data-open', '1');
+        drawer.classList.remove('-translate-x-full');
+        drawer.classList.add('active', 'translate-x-0');
+        drawer.style.transform = 'translateX(0%)';
         if (overlay) {
-            overlay.classList.remove("opacity-0", "pointer-events-none", "hidden");
+            overlay.classList.remove('opacity-0', 'pointer-events-none', 'hidden');
+            overlay.classList.add('active', 'opacity-100', 'pointer-events-auto');
+            overlay.style.display = 'block';
+            overlay.style.pointerEvents = 'auto';
+            overlay.style.opacity = '1';
         }
     } else {
-        drawer.classList.add("-translate-x-full");
+        drawer.setAttribute('data-open', '0');
+        drawer.classList.add('-translate-x-full');
+        drawer.classList.remove('active', 'translate-x-0');
+        drawer.style.transform = 'translateX(-100%)';
         if (overlay) {
-            overlay.classList.add("opacity-0", "pointer-events-none");
+            overlay.classList.add('opacity-0', 'pointer-events-none');
+            overlay.classList.remove('active', 'opacity-100', 'pointer-events-auto');
+            overlay.style.display = 'none';
+            overlay.style.pointerEvents = 'none';
+            overlay.style.opacity = '0';
         }
     }
 }
@@ -27,17 +49,22 @@ if (typeof window !== 'undefined') {
     window.safeCreateIcons();
 }
 
-        let supabaseClient = null;
-        let cloudConfigCollapsed = true;
+var supabaseClient = null;
+window.supabaseClient = supabaseClient;
+var cloudConfigCollapsed = true;
+window.cloudConfigCollapsed = cloudConfigCollapsed;
 
-        // Emoji Builder State
-        let emojiTokens = [
-            { type: 'var', value: '{name}' },
-            { type: 'sep', value: '：' },
-            { type: 'var', value: '{url}' }
-        ];
-        let selectedEmojiPackItems = new Set();
-        let selectedEmojiPackIdsInList = new Set();
+// Emoji Builder State
+var emojiTokens = [
+    { type: 'var', value: '{name}' },
+    { type: 'sep', value: '：' },
+    { type: 'var', value: '{url}' }
+];
+window.emojiTokens = emojiTokens;
+var selectedEmojiPackItems = new Set();
+window.selectedEmojiPackItems = selectedEmojiPackItems;
+var selectedEmojiPackIdsInList = new Set();
+window.selectedEmojiPackIdsInList = selectedEmojiPackIdsInList;
 
         function showToast(icon, message, duration = 3000) {
             const container = document.getElementById('toastContainer');
