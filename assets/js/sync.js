@@ -13,10 +13,19 @@ function toggleCloudConfigCollapse() {
         let db, currentTab = 'cards', currentItem = null, personalityCollapsed = true;
 
         function toggleSidebar() {
-            const drawer = document.getElementById('sidebarDrawer'), overlay = document.getElementById('drawerOverlay');
-            if (!drawer.classList.contains('-translate-x-full')) { drawer.classList.add('-translate-x-full'); overlay.classList.add('opacity-0', 'pointer-events-none'); }
-            else { drawer.classList.remove('-translate-x-full'); overlay.classList.remove('opacity-0', 'pointer-events-none'); }
+            const drawer = document.getElementById('sidebarDrawer') || document.getElementById('sidebar');
+            const overlay = document.getElementById('drawerOverlay');
+            if (!drawer) return;
+            const isClosed = drawer.classList.contains('-translate-x-full');
+            if (isClosed) {
+                drawer.classList.remove('-translate-x-full');
+                if (overlay) overlay.classList.remove('opacity-0', 'pointer-events-none', 'hidden');
+            } else {
+                drawer.classList.add('-translate-x-full');
+                if (overlay) overlay.classList.add('opacity-0', 'pointer-events-none');
+            }
         }
+        window.toggleSidebar = toggleSidebar;
 
         const request = indexedDB.open('TavernCardHubDB', 1);
         request.onupgradeneeded = (e) => {

@@ -1,14 +1,22 @@
 
 function toggleSidebar() {
-    const sidebar = document.getElementById("sidebar");
+    const drawer = document.getElementById("sidebarDrawer") || document.getElementById("sidebar");
     const overlay = document.getElementById("drawerOverlay");
-    if (sidebar) {
-        sidebar.classList.toggle("-translate-x-full");
-    }
-    if (overlay) {
-        overlay.classList.toggle("hidden");
+    if (!drawer) return;
+    const isClosed = drawer.classList.contains("-translate-x-full");
+    if (isClosed) {
+        drawer.classList.remove("-translate-x-full");
+        if (overlay) {
+            overlay.classList.remove("opacity-0", "pointer-events-none", "hidden");
+        }
+    } else {
+        drawer.classList.add("-translate-x-full");
+        if (overlay) {
+            overlay.classList.add("opacity-0", "pointer-events-none");
+        }
     }
 }
+window.toggleSidebar = toggleSidebar;
 
 if (typeof window !== 'undefined') {
     window.safeCreateIcons = function() {

@@ -1,6 +1,6 @@
 function safeCreateLucideIcons() {
     if (typeof window !== 'undefined' && typeof window.lucide !== 'undefined' && typeof window.lucide.createIcons === 'function') {
-        try { window.lucide.createIcons(); } catch(e) {}
+        try { window.safeCreateLucideIcons(); } catch(e) {}
     }
 }
 window.safeCreateLucideIcons = safeCreateLucideIcons;
@@ -1493,7 +1493,7 @@ window.saveGalleryUrl = saveGalleryUrl;
             // 如果是在子文件夹内部且为空，允许渲染顶部的面包屑导航与导入按钮
             if (filtered.length === 0 && !currentFolderOpened && (keyword || currentTab === 'emojis' || currentTab === 'fonts')) { 
                 container.innerHTML = `<div class="col-span-full py-20 text-center text-[#b89b9d]"><i data-lucide="inbox" class="w-10 h-10 mx-auto mb-2 opacity-30"></i><p class="text-xs">暂无资产</p></div>`; 
-                lucide.createIcons(); 
+                safeCreateLucideIcons(); 
                 return; 
             }
 
@@ -1630,7 +1630,7 @@ window.saveGalleryUrl = saveGalleryUrl;
                         `;
                         container.appendChild(fCard);
                     });
-                    lucide.createIcons();
+                    safeCreateLucideIcons();
                     return;
                 } else if (currentFolderOpened && !keyword) {
                     // Filter assets inside this folder
@@ -1833,7 +1833,7 @@ if (currentTab === 'docs' || currentTab === 'regex') {
                 container.appendChild(card);
             });
 
-            lucide.createIcons();
+            safeCreateLucideIcons();
         }
 
         
@@ -1961,7 +1961,7 @@ if (currentTab === 'docs' || currentTab === 'regex') {
                         ` : ''}
                     </div>
                 `;
-                lucide.createIcons();
+                safeCreateLucideIcons();
                 return;
             }
 
@@ -2000,7 +2000,7 @@ if (currentTab === 'docs' || currentTab === 'regex') {
                         </div>
                     </div>
                 `;
-                lucide.createIcons();
+                safeCreateLucideIcons();
                 return;
             }
 
@@ -2056,7 +2056,7 @@ if (currentTab === 'docs' || currentTab === 'regex') {
                 `;
                 container.appendChild(itemCard);
             });
-            lucide.createIcons();
+            safeCreateLucideIcons();
         }
 
         function togglePersonalityCollapse() {
@@ -2195,7 +2195,7 @@ if (currentTab === 'docs' || currentTab === 'regex') {
                     btnJson.className = "px-2 py-0.8 rounded-xl bg-[#e8f8f0] text-[#5b8a7f] hover:bg-[#d8ebe5] text-[10px] font-bold transition flex items-center gap-1 shrink-0"; btnJson.innerHTML = `<i data-lucide="file-json" class="w-3 h-3"></i> 导出JSON`; container.insertBefore(btnJson, container.firstChild);
                 }
             }
-            lucide.createIcons();
+            safeCreateLucideIcons();
         }
 
         function arrayBufferToBase64(buffer) {
@@ -2242,7 +2242,7 @@ if (currentTab === 'docs' || currentTab === 'regex') {
                 box.innerHTML = `<div class="flex items-center justify-between pb-2 border-b border-[#f5e1e3]"><button onclick="toggleGreetingItemCollapse(${index})" class="text-xs font-bold text-[#b86b7a] flex items-center gap-1.5"><i data-lucide="chevron-down" id="greeting-chevron-${index}" class="w-3.5 h-3.5 text-[#d88c9a] transition-transform duration-200"></i><span>${gItem.title}</span></button><button onclick="copyGreetingText(${index})" class="text-xs text-[#a38b8d] hover:text-[#d88c9a] flex items-center gap-1"><i data-lucide="copy" class="w-3.5 h-3.5"></i> 复制</button></div><div id="greeting-body-${index}" class="hidden"><div id="greeting-text-${index}" class="text-xs text-[#5c494a] leading-relaxed font-sans whitespace-pre-wrap pt-1">${gItem.text}</div></div>`;
                 container.appendChild(box);
             });
-            lucide.createIcons();
+            safeCreateLucideIcons();
         }
 
         function toggleGreetingItemCollapse(index) {
@@ -2360,7 +2360,7 @@ if (currentTab === 'docs' || currentTab === 'regex') {
 
                 container.appendChild(card);
             });
-            lucide.createIcons();
+            safeCreateLucideIcons();
         }
 
         function toggleWbEntryCollapse(index) {
@@ -2393,7 +2393,7 @@ if (currentTab === 'docs' || currentTab === 'regex') {
 
                 container.appendChild(card);
             });
-            lucide.createIcons();
+            safeCreateLucideIcons();
         }
 
         function copyEntryContent(index) {
@@ -2992,7 +2992,7 @@ function renderCustomCategoriesMenu() {
         `;
         container.appendChild(catBtn);
     });
-    lucide.createIcons();
+    safeCreateLucideIcons();
 }
 
 function deleteCustomCategory(idx, e) {
@@ -3515,7 +3515,7 @@ async function triggerDocPasteModalPrompt() {
     const oldModal = document.getElementById('customPasteModal');
     if (oldModal) oldModal.remove();
     document.body.insertAdjacentHTML('beforeend', modalHtml);
-    lucide.createIcons();
+    safeCreateLucideIcons();
 
     const titleInput = document.getElementById('customPasteTitle');
     const contentInput = document.getElementById('customPasteContent');
